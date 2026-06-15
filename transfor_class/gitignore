@@ -1,0 +1,72 @@
+# ============================================================
+# SAAD-Net .gitignore
+# ============================================================
+
+# Model checkpoints & weights
+*.pth
+*.pt
+*.ckpt
+*.bin
+*.safetensors
+
+# Experiment result folders
+result*/
+saad_net_fuel*/
+gc_compare/
+gc10_benchmark*/
+gc10det_results/
+gc10_results/
+comparison_experiments/
+saad_com_ablation/
+saad_net/
+ckpt/
+checkpoints/
+runs/
+detection/
+eval_results/
+evaluation_results/
+v2/
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+dist/
+build/
+*.egg
+
+# Jupyter Notebooks
+*.ipynb
+.ipynb_checkpoints/
+
+# Data (too large for git)
+*.csv
+*.npy
+*.npz
+data/
+datasets/
+
+# Logs & outputs
+*.log
+logs/
+wandb/
+mlruns/
+tensorboard/
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Backup files
+*.bak*
+*copy*.py
