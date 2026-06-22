@@ -1089,6 +1089,7 @@ def evaluate_classification(model, loader, criterion, device, return_confusion_m
     class_correct: Dict[int, int] = {}; class_total: Dict[int, int] = {}
     all_preds = []  # For confusion matrix
     all_labels = []  # For confusion matrix
+    num_batches = 0  # local batch count, summed across ranks for correct loss averaging
     pbar = tqdm(loader, desc="Evaluating") if is_main_process() else loader
     for images, labels in pbar:
         images = images.to(device, non_blocking=True)
@@ -1106,6 +1107,7 @@ def evaluate_classification(model, loader, criterion, device, return_confusion_m
         else:
             loss = criterion(outputs, labels)
         total_loss += loss.item()
+        num_batches += 1
         _, predicted = outputs.max(1)
         total += labels.size(0); correct += predicted.eq(labels).sum().item()
         
@@ -1119,15 +1121,19 @@ def evaluate_classification(model, loader, criterion, device, return_confusion_m
             if pred == label:
                 class_correct[label] = class_correct.get(label, 0) + 1
 
-    # === DDP FIX: aggregate scalar accuracy and per-class counts across ALL ranks ===
-    # Previously only rank-0's local shard was reported, so val_acc / class_acc were
-    # computed on ~1/world_size of the validation set, producing inflated, unstable
-    # numbers that disagreed with the all-reduced confusion matrix. We now all-reduce
-    # the running totals so every reported metric reflects the FULL validation set.
+    # === DDP FIX: aggregate loss, accuracy, and per-class counts across ALL ranks ===
+    # With a pad-free validation sampler each rank holds a disjoint shard, so the
+    # running sums (total_loss, num_batches, correct, total, class_*) must be summed
+    # across ranks before averaging. Otherwise every reported metric (val_loss/val_acc/
+    # class_acc) reflects only ~1/world_size of the validation set.
     if dist.is_initialized():
-        agg = torch.tensor([correct, total], dtype=torch.long, device=device)
+        agg = torch.tensor([total_loss, float(num_batches), float(correct), float(total)],
+                           dtype=torch.float64, device=device)
         dist.all_reduce(agg, op=dist.ReduceOp.SUM)
-        correct, total = int(agg[0].item()), int(agg[1].item())
+        total_loss  = float(agg[0].item())
+        num_batches = int(agg[1].item())
+        correct     = int(agg[2].item())
+        total       = int(agg[3].item())
 
         n_cls = num_classes if num_classes is not None else (max(class_total) + 1 if class_total else 0)
         cc = torch.zeros(n_cls, dtype=torch.long, device=device)
@@ -1140,6 +1146,9 @@ def evaluate_classification(model, loader, criterion, device, return_confusion_m
         class_correct = {k: int(cc[k].item()) for k in range(n_cls) if int(ct[k].item()) > 0}
         class_total   = {k: int(ct[k].item()) for k in range(n_cls) if int(ct[k].item()) > 0}
 
+    # Guard against division by zero on empty shards
+    num_batches = max(num_batches, 1)
+    total = max(total, 1)
     class_acc = {k: 100. * class_correct.get(k, 0) / class_total[k] for k in class_total}
     
     if return_confusion_matrix:
@@ -1164,8 +1173,8 @@ def evaluate_classification(model, loader, criterion, device, return_confusion_m
         else:
             cm = local_cm
         
-        return total_loss / len(loader), 100. * correct / total, class_acc, cm
-    return total_loss / len(loader), 100. * correct / total, class_acc
+        return total_loss / num_batches, 100. * correct / total, class_acc, cm
+    return total_loss / num_batches, 100. * correct / total, class_acc
 
 
 @torch.no_grad()
@@ -1754,20 +1763,7 @@ def train_classification(args):
         print_rank0(f"Auto-detected num_classes: {args.num_classes}")
 
     train_sampler = DistributedSampler(train_dataset) if distributed else None
-    # Pad-free validation sampler: each rank gets a disjoint contiguous shard with NO
-    # duplicated padding samples, so the all-reduced totals equal the true val set size.
-    if distributed:
-        class _PadFreeValSampler(torch.utils.data.Sampler):
-            def __init__(self, dataset, num_replicas, rank):
-                self.n = len(dataset); self.num_replicas = num_replicas; self.rank = rank
-                self.indices = list(range(self.n))[rank::num_replicas]
-            def __iter__(self): return iter(self.indices)
-            def __len__(self): return len(self.indices)
-        val_sampler = _PadFreeValSampler(val_dataset,
-                                         num_replicas=dist.get_world_size(),
-                                         rank=dist.get_rank())
-    else:
-        val_sampler = None
+    val_sampler   = DistributedSampler(val_dataset, shuffle=False) if distributed else None
     train_loader  = DataLoader(train_dataset, batch_size=args.batch_size, shuffle=(train_sampler is None),
                                sampler=train_sampler, num_workers=4, pin_memory=True, drop_last=True)
     val_loader    = DataLoader(val_dataset, batch_size=args.batch_size, shuffle=False,
@@ -1817,7 +1813,8 @@ def train_classification(args):
 
     if args.model in ['defect_lock_v2_imp', 'saad_net'] and DEFECT_LOCK_V2_IMP_AVAILABLE:
         criterion = DefectLoCKv2ImprovedLoss(num_classes=args.num_classes, focal_gamma=2.0,
-                                              label_smoothing=0.1, contrastive_weight=args.defect_lock_contrastive_weight, temperature=0.07)
+                                              label_smoothing=0.1, contrastive_weight=args.defect_lock_contrastive_weight, temperature=0.07,
+                                              scale_weight=args.defect_lock_scale_weight, class_names=class_names)
     else:
         criterion = FocalLoss(gamma=2.0)
 
@@ -1861,7 +1858,7 @@ def train_classification(args):
             ema=ema, current_contrastive_weight=current_contrastive_weight)
 
         if ema is not None: ema.apply_shadow()
-        val_loss, val_acc, class_acc = evaluate_classification(model, val_loader, criterion, device, num_classes=args.num_classes)
+        val_loss, val_acc, class_acc = evaluate_classification(model, val_loader, criterion, device)
         if ema is not None: ema.restore()
 
         # Check if this is the best model (need to broadcast decision to all ranks for confusion matrix)
@@ -2272,9 +2269,12 @@ def main():
     parser.add_argument('--ultra_config', type=str, default='default',
                         choices=['default', 'fpn', 'deep', 'arcface', 'full'])
     parser.add_argument('--defect_v2_config', type=str, default='default',
-                        choices=['baseline', 'cbam_only', 'cbam_laa', 'attention_only',
-                                 'default', 'light', 'frozen', 'full'])
+                        choices=['baseline', 'cbam_only', 'cbam_laa', 'cbam_laa_cdl', 'attention_only',
+                                 'default', 'default_saa_first', 'default_scale_cdl',
+                                 'light', 'frozen', 'full'])
     parser.add_argument('--defect_lock_contrastive_weight', type=float, default=0.1)
+    parser.add_argument('--defect_lock_scale_weight', type=float, default=0.1,
+                        help='Weight for S-SAA scale-supervision KL loss (Method 2). 0 disables it.')
     parser.add_argument('--saad_config', type=str, default='saad_default',
                         choices=['baseline', 'cbam_laa', 'saad_fpn', 'saad_fpn_pca', 'saad_default'])
     parser.add_argument('--saad_v2_config', type=str, default='v2_default',
