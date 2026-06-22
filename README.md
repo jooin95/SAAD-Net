@@ -87,7 +87,7 @@ torchrun --nproc_per_node=8 train_unified.py \
     --num_classes 11 \
     --img_size 1024 \
     --epochs 200 \
-    --batch_size 4 \
+    --batch_size 8 \
     --lr 1e-4
 
 # PEMFC (7 classes)
@@ -97,7 +97,7 @@ torchrun --nproc_per_node=8 train_unified.py \
     --num_classes 7 \
     --img_size 1024 \
     --epochs 200 \
-    --batch_size 4 \
+    --batch_size 8 \
     --lr 5e-5
 ```
 
