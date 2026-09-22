@@ -127,7 +127,7 @@ CUDA_VISIBLE_DEVICES=0 python measure_efficiency.py --img_size 1024
 @article{joo2026saadnet,
   title   = {SAAD-Net: Scale-Adaptive Anomaly-aware Defect Network with Contrastive Learning for Multi-Class Defect Classification},
   author  = {Joo, In and Kim, Sung-Hoon and Seo, Mintaek and Ryu, Ga-Ae and Yoo, Kwan-Hee},
-  journal = {Scientific Reports},
+  journal = {},
   year    = {2026}
 }
 ```
