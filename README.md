@@ -1,6 +1,6 @@
 # SAAD-Net: Scale-Adaptive Anomaly-aware Defect Network
 
-Official implementation of **"SAAD-Net: Scale-Adaptive Anomaly-aware Defect Network with Contrastive Learning for Multi-Class Defect Classification"** (Scientific Reports, 2026).
+Official implementation of **"SAAD-Net: Scale-Adaptive Anomaly-aware Defect Network with Contrastive Learning for Multi-Class Defect Classification"**.
 
 SAAD-Net is a classification architecture for industrial defect inspection, built on a Swin Transformer V2-Tiny backbone with three defect-specific modules:
 
