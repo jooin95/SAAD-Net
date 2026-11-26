@@ -1,49 +1,42 @@
-# SAAD-Net: Scale-Adaptive Anomaly-aware Defect Network
+# SAACD-Net: Scale-Adaptive Anomaly-aware Contrastive Defect Learning Network
 
-Official implementation of **"SAAD-Net: Scale-Adaptive Anomaly-aware Defect Network with Contrastive Learning for Multi-Class Defect Classification"**.
+Code for the manuscript **"Multi-Class Defect Classification Using a Swin Transformer with Scale-Adaptive Attention and Contrastive Learning"** (under review).
 
-SAAD-Net is a classification architecture for industrial defect inspection, built on a Swin Transformer V2-Tiny backbone with three defect-specific modules:
+> The paper calls the model **SAACD-Net**. The repository and the code keep the earlier name SAAD-Net: the model class is `SAADNet` (an alias of `DefectLoCKv2Improved`) and the training script selects it with `--model defect_lock_v2_imp`.
 
-- **LAA (Lightweight Anomaly-Aware Attention)** — amplifies defect-relevant regions from feature statistics.
-- **S-SAA (Simplified Scale-Adaptive Attention)** — per-image learnable scale weighting across parallel dilated branches.
-- **CDL (Contrastive Defect Learning)** — supervised contrastive objective with progressive warmup.
+SAACD-Net is a multi-class defect classifier for high-resolution inspection images. It keeps a Swin Transformer V2-Tiny backbone and adds the established CBAM module and three components:
 
-It is evaluated on a proprietary PEMFC electrode dataset (7 classes) and the public GC10-DET steel surface defect benchmark (11 classes).
+- **LAA (Lightweight Anomaly-Aware Attention)**: computes an anomaly map from feature statistics and amplifies its high-scoring regions with a learnable residual gain.
+- **S-SAA (Simplified Scale-Adaptive Attention)**: fuses parallel dilated branches (d = 1, 2, 4) and a global-context branch with per-image weights.
+- **CDL (Contrastive Defect Learning)**: a supervised contrastive objective introduced with a progressive warmup.
 
 ---
 
 ## Results
 
-Mean ± standard deviation over independent training runs with identical hyperparameters and different random seeds.
+Mean ± standard deviation over three independent runs per model, with identical hyperparameters and no fixed training seed. The checkpoint of each run is selected on the validation split; the held-out test splits are used for neither training nor checkpoint selection.
 
-| Dataset | Split | SAAD-Net | Swin V2-T backbone | Runs |
+| Dataset | Split | SAACD-Net | Swin V2-T backbone | Runs |
 |---|---|---|---|---|
-| PEMFC electrode (7 classes) | validation, 280 images | **75.14 ± 2.34%** | 69.50 ± 1.76% | 5 |
-| GC10-DET (11 classes) | validation, 689 images | **87.38 ± 0.94%** | 82.87 ± 0.28% | 3 |
+| Contact lens (5 defect classes) | held-out test, 3,217 images | **96.22 ± 0.72%** | 94.87 ± 0.91% | 3 |
 | GC10-DET (11 classes) | held-out test, 701 images | **84.35 ± 1.51%** | 80.70 ± 3.07% | 3 |
 
-Notes.
+The other compared models, the ablation study and the significance tests are reported in the paper.
 
-- The PEMFC validation set is class-balanced by augmentation (40 images per class); the underlying source-image counts differ per class.
-- The GC10-DET test split is used for neither training nor checkpoint selection: each run is evaluated on it with the checkpoint chosen on the validation split.
-- Efficiency (single NVIDIA RTX A5000, 1024×1024 input): 30.3M parameters, 96.8 GMACs, 28.0 FPS, 427 MB peak memory.
+Efficiency (one NVIDIA RTX A5000, 1024×1024 input, batch size 1, eleven-class head): 30.3M parameters, 96.8 GMACs, 28.0 FPS, 427 MB peak memory.
 
 ---
 
 ## Requirements
 
-- Python 3.10, CUDA 11.8
-- torch 2.0
-- timm
-- numpy, scipy, scikit-learn
-- opencv-python, pillow
-- matplotlib
-- tqdm
-- fvcore (for efficiency measurement)
+Tested with Python 3.9, PyTorch 2.6 (CUDA 12.4) and torchvision 0.21.
 
 ```bash
-pip install -r transfor_class/requirements.txt
+pip install torch==2.6.0 torchvision==0.21.0 timm==1.0.15 numpy scipy scikit-learn \
+    opencv-python pillow matplotlib seaborn tqdm fvcore
 ```
+
+`timm` is needed only for the ViT-Base, DeiT3, PVT-v2 and CAFormer baselines. `transfor_class/requirements.txt` is a full export of the training environment, kept for reference.
 
 ---
 
@@ -51,82 +44,117 @@ pip install -r transfor_class/requirements.txt
 
 | Path | Purpose |
 |---|---|
-| `transfor_class/models/defect_lock_v2_improved.py` | **SAAD-Net model** (LAA, S-SAA, CDL modules) |
-| `transfor_class/train_unified.py` | Main training / evaluation entry point (distributed, multi-GPU) |
-| `transfor_class/eval/`, `transfor_class/utils/` | Evaluation and supporting utilities |
-| `transfor_class/run_gc10_benchmark.sh` | GC10-DET benchmark driver |
+| `transfor_class/defect_lock_v2_improved.py` | **SAACD-Net model** (CBAM, LAA, S-SAA, CDL) and its training loss |
+| `transfor_class/train_unified.py` | Training entry point (distributed data parallel, multi-GPU) |
+| `transfor_class/eval/comprehensive_evaluation.py` | Evaluation of a saved SAACD-Net checkpoint on a class-folder split |
 | `results/gc10/` | Training history and confusion matrix of the representative GC10-DET run |
 
-> **Note on imports.** `train_unified.py` imports the model as `from defect_lock_v2_improved import ...`, so make sure `defect_lock_v2_improved.py` is importable from the working directory (run from `transfor_class/` with `models/` on the `PYTHONPATH`, or place `defect_lock_v2_improved.py` in that directory). The repository also contains earlier development variants (`defect_lock.py`, `defect_lock_v2.py`, `saad_net_origin.py`, `train_saad_v3.py`, and other `train_*.py` scripts) that are **not** used for the reported results.
-
-> **Not included here.** The GC10-DET preprocessing script and the efficiency-measurement script are not part of this repository; they are available from the corresponding author upon reasonable request, together with the PEMFC preprocessing pipeline.
+`train_unified.py` imports the model from the `defect_lock_v2_improved.py` file next to it, so run it from `transfor_class/`. The other model and training files in the repository (including `models/`, `defect_lock.py`, `defect_lock_v2.py`, `saad_net_origin.py`, `train_saad_v3.py`, the other `train_*.py` scripts and `run_gc10_benchmark.sh`) are earlier development versions and were **not** used for the reported results.
 
 ---
 
 ## Datasets
 
-**PEMFC electrode dataset.** Proprietary, collected from a live fuel-cell manufacturing line; cannot be redistributed due to industrial confidentiality. Available from the corresponding author upon reasonable request.
+**Contact lens dataset.** Proprietary images from a contact lens production line; they cannot be redistributed due to industrial confidentiality. The dataset holds 21,443 single-label lens images of 1000×1000 pixels in five defect classes (`position`, `bubble`, `color`, `edge`, `etc`). The split is made first, at the level of lot–position groups (no group contributes images to more than one split), giving 15,010 training, 3,216 validation and 3,217 test images. Each image is then enhanced independently with Bilateral-CLAHE: a bilateral filter (d = 9, σ_color = 75, σ_space = 75) followed by CLAHE (clip limit 2.0, 8×8 tiles) on the lightness channel in CIELAB space.
 
-**GC10-DET.** Publicly available at https://github.com/lvxiaoming2019/GC10-DET.
+**GC10-DET.** Public, available at https://github.com/lvxiaoming2019/GC10-DET. Each ~2048×1000 image is split along the vertical centerline into two halves. A half inherits every annotated box that places at least 30% of its area within it and takes the class of its largest annotated defect (objects flagged difficult are excluded); a half with no remaining defect is labeled `good`, giving 11 classes. The 70/15/15 train/validation/test split is stratified and made at the original-image level before bisection (seed 42), giving 3,224 training, 689 validation and 701 test images.
 
-### GC10-DET preprocessing
+The lens split and enhancement scripts and the GC10-DET preprocessing script are not part of this repository; they are available from the corresponding author upon reasonable request.
 
-Each original 2048×1000 image is split along the vertical centerline into two halves, each resized to 1024×1024. A half inherits every annotated box that places at least 30% of its area within it, and is labeled by the largest-area rule; a half with no remaining annotated defect is labeled **Good**, giving 11 classes. The 70/15/15 train/validation/test split is stratified and performed at the original-image level before bisection (seed 42), so both halves of an image stay in the same split. This yields **3,224 training, 689 validation and 701 test** images.
+Both datasets are read from class folders:
 
----
-
-## Usage
-
-### Training
-
-```bash
-# GC10-DET (11 classes), 4 GPUs, distributed
-torchrun --nproc_per_node=4 train_unified.py \
-    --data_dir ./gc10_cropped \
-    --model defect_lock_v2_imp \
-    --num_classes 11 \
-    --img_size 1024 \
-    --epochs 200 \
-    --batch_size 4 \
-    --lr 1e-4
-
-# PEMFC (7 classes), 8 GPUs, distributed
-torchrun --nproc_per_node=8 train_unified.py \
-    --data_dir /path/to/pemfc_processed \
-    --model defect_lock_v2_imp \
-    --num_classes 7 \
-    --img_size 1024 \
-    --epochs 200 \
-    --batch_size 8 \
-    --lr 5e-5
+```
+DATA_DIR/
+  train/<class>/*.png
+  val/<class>/*.png
+  test/<class>/*.png
 ```
 
-Both datasets use AdamW, cosine annealing with a 5-epoch warmup, early stopping with patience 20, dropout 0.3, focal loss (γ = 2.0, label smoothing 0.1), contrastive temperature 0.07 and a 10-epoch CDL warmup.
-
-The full SAAD-Net model corresponds to `--model defect_lock_v2_imp` with the default config. Baselines in the paper are selected via `--model` (e.g. `swin_v2_t`, `vit_base`, `efficientnet_b4`, `resnet50`).
+`train_unified.py` reads `train/` and `val/`. The `test/` split is used only for the final evaluation.
 
 ---
 
-## Reproducing the paper
+## Training
 
-- Backbone: Swin Transformer V2-Tiny pretrained on ImageNet-22K.
-- Evaluation aggregates metrics across all GPUs (`dist.all_reduce`) and reports on the full validation split; the GC10-DET test split is then evaluated once with the same best-validation checkpoint, without re-selection.
-- Random seed fixed (`seed=42`) for dataset splitting; training seeds differ across runs.
-- Reported accuracies are means over independent runs: five runs for the configurations the main claims rest on (SAAD-Net, the Swin V2-T baseline, EfficientNet-B4, the removal-block variants and the preprocessing ablation) and three for the remaining PEMFC rows; three runs for every GC10-DET model.
-- Per-class tables and confusion matrices in the paper are shown for a representative run rather than averaged: PEMFC 75.71% at epoch 17, GC10-DET 87.08% at epoch 172.
+```bash
+cd transfor_class
+
+# Contact lens dataset (5 classes), 8 GPUs
+torchrun --nproc_per_node=8 train_unified.py \
+    --data_dir /path/to/lens_split_enhanced \
+    --model defect_lock_v2_imp --defect_v2_config default \
+    --num_classes 5 --img_size 1024 --batch_size 8 \
+    --epochs 200 --patience 20 --warmup 5 --lr 5e-5 \
+    --save_dir runs/lens_saacd_r1
+
+# GC10-DET (11 classes), 4 GPUs
+torchrun --nproc_per_node=4 train_unified.py \
+    --data_dir /path/to/gc10_halves \
+    --model defect_lock_v2_imp --defect_v2_config default \
+    --num_classes 11 --img_size 1024 --batch_size 4 \
+    --epochs 200 --patience 20 --warmup 5 --lr 1e-4 \
+    --save_dir runs/gc10_saacd_r1
+```
+
+- `--batch_size` is per GPU (total 64 on the lens dataset, 16 on GC10-DET). `--lr` is a base rate that the script multiplies by the number of GPUs.
+- The script saves the checkpoint with the best validation accuracy as `best_model.pth` and stops after 20 epochs without improvement. Training uses mixed precision (FP16).
+- SAACD-Net loss: focal loss (γ = 2.0, label smoothing 0.1); supervised contrastive loss (weight 0.1, temperature 0.07, linear warmup over 10 epochs); S-SAA balance term (weight 0.1), the KL divergence that pulls the branch weights toward the uniform allocation. Every class of the two datasets receives this uniform target. The loss also contains a size table keyed by other class names, which is not used here; keep class folder names different from its keys.
+- Training-time augmentation and all hyperparameters are listed in the paper.
+
+### Ablation configurations (contact lens dataset)
+
+| Row in the paper | `--defect_v2_config` |
+|---|---|
+| Baseline (Swin V2-T, modules off) | `baseline` |
+| + CBAM | `cbam_only` |
+| + LAA | `cbam_laa` |
+| + S-SAA (still without CDL) / Full model without CDL | `attention_only` |
+| Full model | `default` |
+| Full model without S-SAA | `cbam_laa_cdl` |
+| Full model without Bilateral-CLAHE | `default`, trained on the unenhanced split |
+
+### Compared models
+
+Selected with `--model` (no `--defect_v2_config`): `swin_v2_t`, `resnet50`, `efficientnet_b4` and `vit_base` on the lens dataset; `swin_v2_t`, `vit_base`, `deit3_small`, `pvt_v2_b2` and `caformer_s18` on GC10-DET. All use the same split, input size, optimizer and early-stopping rule as SAACD-Net, with focal loss (γ = 2.0) and no label smoothing.
+
+---
+
+## Evaluation on the test split
+
+The test split is evaluated once per run with `best_model.pth`, using the validation preprocessing (resize to 1024×1024, ImageNet normalization):
+
+```bash
+cd transfor_class
+PYTHONPATH=. python eval/comprehensive_evaluation.py \
+    --checkpoint runs/lens_saacd_r1/best_model.pth \
+    --data_dir /path/to/lens_split_enhanced/test \
+    --img_size 1024 --batch_size 2 --output_dir eval_lens_r1
+```
+
+The evaluation script rebuilds the full SAACD-Net model.
+
+---
+
+## Notes for reproducing the paper
+
+- Backbone: torchvision Swin Transformer V2-Tiny with ImageNet-1K weights.
+- Every configuration was run three times; the paper reports mean ± standard deviation and two-sided Welch's *t*-tests on test accuracy.
+- Per-class tables and confusion matrices in the paper come from one representative run, the run closest to the three-run test mean: 96.24% on the lens test split and 84.59% on the GC10-DET test split (checkpoint from epoch 172).
 
 ---
 
 ## Citation
 
 ```bibtex
-@article{joo2026saadnet,
-  title   = {SAAD-Net: Scale-Adaptive Anomaly-aware Defect Network with Contrastive Learning for Multi-Class Defect Classification},
-  author  = {Joo, In and Kim, Sung-Hoon and Seo, Mintaek and Ryu, Ga-Ae and Yoo, Kwan-Hee},
+@article{joo2026saacdnet,
+  title   = {Multi-Class Defect Classification Using a Swin Transformer with Scale-Adaptive Attention and Contrastive Learning},
+  author  = {Joo, In and Kim, Sung-Hoon and Ryu, Ga-Ae and Yoo, Kwan-Hee},
   year    = {2026},
   note    = {Manuscript under review}
 }
 ```
+
+Corresponding author: Kwan-Hee Yoo (khyoo@chungbuk.ac.kr).
 
 ---
 
